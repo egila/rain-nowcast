@@ -88,11 +88,19 @@ def test_eta_handles_current_arrival_horizon_and_no_arrival() -> None:
 
 
 def test_eta_uses_the_configured_neighborhood() -> None:
-    """A nearby cell can trigger a robust arrival when the radius includes it."""
+    """A nearby cell can trigger a future robust arrival when it moves homeward."""
     data = np.zeros((20, 30), dtype=np.uint8)
     data[9, 20] = 120
 
     assert predict_rain_arrival(_frame(data), _motion(), 10, 20, 0.1, 60, 0) is None
     prediction = predict_rain_arrival(_frame(data), _motion(), 10, 20, 0.1, 60, 1)
     assert prediction is not None
-    assert prediction.eta_minutes == 0
+    assert prediction.eta_minutes == 5
+
+
+def test_stationary_nearby_rain_does_not_become_an_arrival() -> None:
+    """A wet nearby cell must not produce a false ETA without movement."""
+    data = np.zeros((20, 30), dtype=np.uint8)
+    data[9, 20] = 120
+
+    assert predict_rain_arrival(_frame(data), _motion(dx=0), 10, 20, 0.1, 60, 1) is None

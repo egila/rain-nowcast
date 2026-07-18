@@ -107,3 +107,17 @@ def test_eta_and_approaching_use_prediction_and_configured_thresholds() -> None:
     assert eta.native_value == prediction.eta_at
     assert eta.extra_state_attributes["eta_minutes"] == 20
     assert approaching.is_on is True
+
+
+def test_rain_already_at_home_is_not_reported_as_approaching() -> None:
+    """Approaching is reserved for a future arrival, not rainfall already here."""
+    timestamp = datetime(2026, 7, 18, tzinfo=UTC)
+    prediction = RainPrediction(
+        eta_minutes=0,
+        eta_at=timestamp,
+        predicted_intensity=0.4,
+        forecast_horizon_minutes=0,
+        motion_confidence=0.8,
+    )
+
+    assert RainApproachingBinarySensor(_coordinator(_data(prediction))).is_on is False

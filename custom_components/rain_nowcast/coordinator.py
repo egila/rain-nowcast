@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -167,6 +168,11 @@ class RainNowcastCoordinator(DataUpdateCoordinator[RainNowcastData]):
                         self.settings.max_forecast_minutes,
                         self.settings.neighborhood_radius,
                     )
+                    if prediction is not None and prediction.eta_minutes == 0:
+                        # A source frame can be several minutes old when it is
+                        # downloaded. "Already raining" should display as now,
+                        # never as a timestamp in the past.
+                        prediction = replace(prediction, eta_at=datetime.now(UTC))
                 except (ArithmeticError, ValueError) as err:
                     _LOGGER.debug("Rain-arrival prediction unavailable: %s", err)
         elif (

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from math import hypot
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .models import RadarFrame, RadarMotion, RainPrediction
 from .radar import raw_value_to_intensity
+
+MINIMUM_ARRIVAL_MOVEMENT_PIXELS = 0.1
 
 
 def extrapolate_frame(
@@ -57,7 +60,9 @@ def predict_rain_arrival(
     """Return the earliest projected rain arrival, or ``None`` within the horizon."""
     if motion.confidence <= 0.0:
         return None
-    current_raw = _neighborhood_max(frame.data, row, column, neighborhood_radius)
+    # Only rain at the exact home pixel is "now". A nearby wet pixel is used
+    # for future samples, but must not create a false current arrival.
+    current_raw = _neighborhood_max(frame.data, row, column, 0)
     current_intensity = raw_value_to_intensity(current_raw)
     if current_intensity is not None and current_intensity >= rain_threshold:
         return RainPrediction(
@@ -67,6 +72,9 @@ def predict_rain_arrival(
             forecast_horizon_minutes=0,
             motion_confidence=motion.confidence,
         )
+
+    if hypot(motion.dx_pixels, motion.dy_pixels) < MINIMUM_ARRIVAL_MOVEMENT_PIXELS:
+        return None
 
     for minutes in range(5, max_forecast_minutes + 1, 5):
         raw_value = _projected_neighborhood_max(

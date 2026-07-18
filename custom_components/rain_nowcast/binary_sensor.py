@@ -53,7 +53,7 @@ class RainApproachingBinarySensor(
         prediction = data.prediction
         settings = self.coordinator.settings
         return (
-            prediction.eta_minutes <= settings.approaching_lead_minutes
+            0 < prediction.eta_minutes <= settings.approaching_lead_minutes
             and prediction.predicted_intensity >= settings.rain_threshold
             and prediction.motion_confidence >= settings.min_motion_confidence
         )
