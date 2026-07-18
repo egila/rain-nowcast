@@ -5,6 +5,9 @@ It downloads SMHI's official Sweden radar composite as a GeoTIFF every five
 minutes and reports the current rain intensity at Home Assistant's configured
 home location.
 
+Rain Nowcast is an unofficial integration and is not affiliated with or
+endorsed by SMHI.
+
 > This is Phase 1. It intentionally implements only `sensor.rain_intensity`.
 > ETA, confidence, duration, and approaching-rain entities are planned for the
 > frame-history nowcasting phase; exposing them before they are computed would
