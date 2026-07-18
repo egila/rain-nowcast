@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Rain Nowcast",
+        "description": "Rain intensity is calculated for Home Assistant's configured home location."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Rain Nowcast is already configured."
+    }
+  }
+}

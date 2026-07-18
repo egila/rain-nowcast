@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rain-nowcast"
+version = "0.1.0"
+description = "Home Assistant integration for current SMHI radar rain intensity"
+readme = "README.md"
+requires-python = ">=3.14"
+license = { file = "LICENSE" }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+  "COM812",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
