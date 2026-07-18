@@ -3,9 +3,7 @@
 
 from __future__ import annotations
 
-
 from typing import Any
-
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import UnitOfVolumetricFlux
@@ -14,12 +12,9 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-
 from . import RainNowcastConfigEntry
 from .const import ATTRIBUTION, DOMAIN
 from .coordinator import RainNowcastCoordinator
-
-
 
 
 async def async_setup_entry(
