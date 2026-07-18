@@ -17,7 +17,7 @@ DEFAULT_SCAN_INTERVAL: Final = timedelta(minutes=5)
 API_URL: Final = (
     "https://opendata-download-radar.smhi.se/api/version/latest/area/sweden/product/comp"
 )
-API_PARAMS: Final = {"format": "png"}
+API_PARAMS: Final = {"format": "tif"}
 
 
 # SMHI's Sweden composite is published in SWEREF 99 TM (EPSG:3006).

@@ -3,18 +3,18 @@
 ## Architecture
 
 `RainNowcastCoordinator` polls SMHI's composite metadata endpoint with
-`format=png`, selects the newest PNG from `lastFiles`, and downloads it
+`format=tif`, selects the newest GeoTIFF from `lastFiles`, and downloads it
 using Home Assistant's shared `aiohttp` session. The 5-minute coordinator
 interval matches SMHI's normal publication cadence.
 
-PNG decoding is run through `hass.async_add_executor_job`; network I/O, setup,
-updates, and entity lifecycle are asynchronous. Home Assistant already ships
-Pillow for image handling, avoiding a platform-specific native decoder. A
-single pixel is read at the configured home location:
+GeoTIFF decoding is run through `hass.async_add_executor_job`; network I/O,
+setup, updates, and entity lifecycle are asynchronous. Pillow decodes the
+single 8-bit raw radar sample without relying on `imagecodecs`. A single pixel
+is read at the configured home location:
 
 1. `pyproj` converts WGS84 longitude/latitude to SWEREF 99 TM (EPSG:3006).
 2. The projected point maps to the published Sweden-composite extent.
-3. The PNG pixel colour is mapped to dBZ using SMHI's published palette.
+3. The 8-bit pixel value converts to dBZ using `value * 0.4 - 30`.
 4. Values below 5 dBZ are reported as no rain; all other values use SMHI's
    `Z = 10 log10(200 R^1.5)` relation to calculate `R` in mm/h.
 
@@ -47,4 +47,4 @@ pytest --cov=custom_components.rain_nowcast --cov-report=term-missing
 ## SMHI API references
 
 - [Temporal extent and five-minute cadence](https://opendata.smhi.se/radar/temporal_extent)
-- [PNG projection, palette, and Z-R formula](https://opendata.smhi.se/radar/data)
+- [GeoTIFF projection, values, gain/offset, and Z-R formula](https://opendata.smhi.se/radar/data)

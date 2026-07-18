@@ -38,19 +38,19 @@ class RainNowcastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._session = async_get_clientsession(hass)
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Download and decode the newest PNG without blocking the event loop."""
+        """Download and decode the newest GeoTIFF without blocking the event loop."""
         try:
             async with self._session.get(API_URL, params=API_PARAMS) as response:
                 response.raise_for_status()
                 metadata: Mapping[str, Any] = await response.json()
 
-            image_url, valid_time = _latest_png(metadata)
+            image_url, valid_time = _latest_geotiff(metadata)
             async with self._session.get(image_url) as response:
                 response.raise_for_status()
-                png = await response.read()
+                geotiff = await response.read()
 
             intensity = await self.hass.async_add_executor_job(
-                sample_rain_intensity, png, self._latitude, self._longitude
+                sample_rain_intensity, geotiff, self._latitude, self._longitude
             )
         except RadarLocationOutsideCoverage as err:
             raise UpdateFailed(
@@ -67,10 +67,10 @@ class RainNowcastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
 
-def _latest_png(metadata: Mapping[str, Any]) -> tuple[str, str | None]:
-    """Return the PNG link and observation time from API metadata."""
+def _latest_geotiff(metadata: Mapping[str, Any]) -> tuple[str, str | None]:
+    """Return the GeoTIFF link and observation time from API metadata."""
     for file_info in reversed(metadata.get("lastFiles", [])):
         for image_format in file_info.get("formats", []):
-            if image_format.get("key") == "png" and image_format.get("link"):
+            if image_format.get("key") == "tif" and image_format.get("link"):
                 return image_format["link"], file_info.get("valid")
-    raise ValueError("SMHI response does not contain a PNG image")
+    raise ValueError("SMHI response does not contain a GeoTIFF image")

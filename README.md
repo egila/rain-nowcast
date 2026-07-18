@@ -1,7 +1,7 @@
 # Rain Nowcast
 
 `rain_nowcast` is a HACS-compatible custom integration for Home Assistant OS.
-It downloads SMHI's official Sweden radar composite as a PNG every five
+It downloads SMHI's official Sweden radar composite as a GeoTIFF every five
 minutes and reports the current rain intensity at Home Assistant's configured
 home location.
 
