@@ -118,7 +118,12 @@ class RainNowcastCoordinator(DataUpdateCoordinator[RainNowcastData]):
             raise UpdateFailed(message) from err
 
         requested_frames = STARTUP_BACKFILL_FRAMES if not self._frames else 1
-        sources = _recent_geotiffs(metadata, requested_frames)
+        try:
+            sources = _recent_geotiffs(metadata, requested_frames)
+        except ValueError as err:
+            raise UpdateFailed(
+                f"Error communicating with SMHI radar API: {err}"
+            ) from err
         latest_source = sources[-1]
         latest_frame: RadarFrame | None = None
         current_intensity: float | None = None
