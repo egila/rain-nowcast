@@ -5,9 +5,7 @@
   "dependencies": [],
   "iot_class": "cloud_polling",
   "requirements": [
-    "imagecodecs==2026.6.26",
-    "pyproj==3.7.2",
-    "tifffile==2026.7.14"
+    "pyproj==3.7.2"
   ],
   "version": "0.1.0"
 }
