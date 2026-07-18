@@ -38,7 +38,8 @@ General**. It supports locations in SMHI's Sweden-composite coverage area.
 | Entity | Meaning |
 | --- | --- |
 | `sensor.rain_intensity` | Current radar-estimated rain intensity in `mm/h`. |
-| `sensor.rain_eta` | Timestamp for the first predicted arrival; unavailable when no rain is forecast within the selected horizon. Its attributes include `eta_minutes` and predicted intensity. |
+| `binary_sensor.rain_now` | On when the latest radar sample at home meets the configured rain threshold. |
+| `sensor.rain_eta` | Timestamp for the predicted arrival; frozen for the duration of a detected rain event and unavailable when no rain is forecast within the selected horizon. |
 | `binary_sensor.rain_approaching` | On for a sufficiently confident rain arrival within the configured lead time. |
 | `sensor.rain_confidence` | Phase-correlation confidence in percent. |
 | `sensor.radar_motion_x` / `sensor.radar_motion_y` | Eastward and southward movement per radar update, in pixels. |

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -176,3 +178,28 @@ async def test_startup_backfill_navigates_the_daily_archive() -> None:
 
     assert session.urls == ["year", "month", "day"]
     assert sources == (("older", "2026-07-18 12:00"), ("latest", "2026-07-18 12:05"))
+
+
+def test_rain_arrival_timestamp_stays_fixed_until_radar_turns_dry() -> None:
+    """An ongoing rain event retains its first observed arrival timestamp."""
+    instance = object.__new__(coordinator.RainNowcastCoordinator)
+    instance._config_entry = SimpleNamespace(options={})
+    instance._rain_started_at = None
+    started_at = datetime(2026, 7, 18, 23, 0, tzinfo=UTC)
+
+    first = instance._update_rain_arrival(1.0, None, started_at)
+    ongoing = instance._update_rain_arrival(
+        0.5, None, started_at + timedelta(minutes=5)
+    )
+    ended = instance._update_rain_arrival(0.0, None, started_at + timedelta(minutes=10))
+    restarted = instance._update_rain_arrival(
+        0.2, None, started_at + timedelta(minutes=15)
+    )
+
+    assert first is not None
+    assert ongoing is not None
+    assert first.eta_at == started_at
+    assert ongoing.eta_at == started_at
+    assert ended is None
+    assert restarted is not None
+    assert restarted.eta_at == started_at + timedelta(minutes=15)

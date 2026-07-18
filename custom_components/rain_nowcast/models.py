@@ -60,6 +60,11 @@ class NowcastSettings:
     neighborhood_radius: int = DEFAULT_NEIGHBORHOOD_RADIUS
 
 
+def is_raining(intensity: float | None, threshold: float) -> bool:
+    """Return whether a valid radar sample reports actual rain at home."""
+    return intensity is not None and intensity > 0.0 and intensity >= threshold
+
+
 @dataclass(frozen=True, slots=True)
 class RainNowcastData:
     """Compact coordinator data exposed to entities and diagnostics."""

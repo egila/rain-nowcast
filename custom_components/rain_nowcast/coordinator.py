@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -30,7 +29,14 @@ from .const import (
     DOMAIN,
 )
 from .frame_cache import RadarFrameCache
-from .models import NowcastSettings, RadarFrame, RainNowcastData
+from .models import (
+    NowcastSettings,
+    RadarFrame,
+    RadarMotion,
+    RainNowcastData,
+    RainPrediction,
+    is_raining,
+)
 from .motion import estimate_motion
 from .predictor import predict_rain_arrival
 from .radar import (
@@ -69,6 +75,7 @@ class RainNowcastCoordinator(DataUpdateCoordinator[RainNowcastData]):
         self._longitude = longitude
         self._session = async_get_clientsession(hass)
         self._frames = RadarFrameCache()
+        self._rain_started_at: datetime | None = None
 
     @property
     def frame_cache(self) -> RadarFrameCache:
@@ -137,6 +144,26 @@ class RainNowcastCoordinator(DataUpdateCoordinator[RainNowcastData]):
         async with self._session.get(url, params=API_PARAMS) as response:
             response.raise_for_status()
             return await response.json()
+
+    def _update_rain_arrival(
+        self,
+        intensity: float | None,
+        motion: RadarMotion | None,
+        observed_at: datetime,
+    ) -> RainPrediction | None:
+        """Keep a fixed arrival timestamp for one continuous rain event."""
+        if not is_raining(intensity, self.settings.rain_threshold):
+            self._rain_started_at = None
+            return None
+        if self._rain_started_at is None:
+            self._rain_started_at = observed_at
+        return RainPrediction(
+            eta_minutes=0,
+            eta_at=self._rain_started_at,
+            predicted_intensity=intensity,
+            forecast_horizon_minutes=0,
+            motion_confidence=motion.confidence if motion is not None else 0.0,
+        )
 
     async def _async_update_data(self) -> RainNowcastData:
         """Download the newest frame and seed an empty cache from recent history."""
@@ -236,11 +263,6 @@ class RainNowcastCoordinator(DataUpdateCoordinator[RainNowcastData]):
                         self.settings.max_forecast_minutes,
                         self.settings.neighborhood_radius,
                     )
-                    if prediction is not None and prediction.eta_minutes == 0:
-                        # A source frame can be several minutes old when it is
-                        # downloaded. "Already raining" should display as now,
-                        # never as a timestamp in the past.
-                        prediction = replace(prediction, eta_at=datetime.now(UTC))
                 except (ArithmeticError, ValueError) as err:
                     _LOGGER.debug("Rain-arrival prediction unavailable: %s", err)
         elif (
@@ -250,6 +272,13 @@ class RainNowcastCoordinator(DataUpdateCoordinator[RainNowcastData]):
                 "Skipping rain-arrival prediction; newest frame is %.1f minutes old",
                 frame_age_minutes,
             )
+
+        if frame_age_minutes <= MAX_PREDICTION_FRAME_AGE_MINUTES:
+            ongoing_rain = self._update_rain_arrival(
+                current_intensity, motion, datetime.now(UTC)
+            )
+            if ongoing_rain is not None:
+                prediction = ongoing_rain
 
         return RainNowcastData(
             current_intensity=current_intensity,

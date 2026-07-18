@@ -8,7 +8,7 @@ from math import hypot
 import numpy as np
 from numpy.typing import NDArray
 
-from .models import RadarFrame, RadarMotion, RainPrediction
+from .models import RadarFrame, RadarMotion, RainPrediction, is_raining
 from .radar import raw_value_to_intensity
 
 MINIMUM_ARRIVAL_MOVEMENT_PIXELS = 0.1
@@ -64,7 +64,7 @@ def predict_rain_arrival(
     # for future samples, but must not create a false current arrival.
     current_raw = _neighborhood_max(frame.data, row, column, 0)
     current_intensity = raw_value_to_intensity(current_raw)
-    if current_intensity is not None and current_intensity >= rain_threshold:
+    if is_raining(current_intensity, rain_threshold):
         return RainPrediction(
             eta_minutes=0,
             eta_at=frame.timestamp,
@@ -86,7 +86,7 @@ def predict_rain_arrival(
             neighborhood_radius,
         )
         intensity = raw_value_to_intensity(raw_value)
-        if intensity is not None and intensity >= rain_threshold:
+        if is_raining(intensity, rain_threshold):
             return RainPrediction(
                 eta_minutes=minutes,
                 eta_at=frame.timestamp + timedelta(minutes=minutes),

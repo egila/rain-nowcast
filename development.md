@@ -49,6 +49,12 @@ or no projected arrival) result in unavailable prediction entities, not a
 coordinator failure. Diagnostics deliberately omit latitude, longitude, and
 all raster data.
 
+`binary_sensor.rain_now` is independent of motion and ETA: it follows the
+latest location sample and configured rain threshold. When a sample first
+crosses that threshold, the coordinator records a rain-arrival timestamp and
+retains it until radar intensity falls below the threshold. This keeps the ETA
+stable throughout one rain event.
+
 ## Local checks
 
 Create a Python 3.14 virtual environment, install test dependencies, then run:

@@ -8,7 +8,10 @@ from types import SimpleNamespace
 from homeassistant.const import DEGREE, EntityCategory, UnitOfSpeed, UnitOfTime
 
 from custom_components.rain_nowcast import binary_sensor, sensor
-from custom_components.rain_nowcast.binary_sensor import RainApproachingBinarySensor
+from custom_components.rain_nowcast.binary_sensor import (
+    RainApproachingBinarySensor,
+    RainingNowBinarySensor,
+)
 from custom_components.rain_nowcast.models import (
     NowcastSettings,
     RadarMotion,
@@ -23,7 +26,9 @@ from custom_components.rain_nowcast.sensor import (
 )
 
 
-def _data(prediction: RainPrediction | None = None) -> RainNowcastData:
+def _data(
+    prediction: RainPrediction | None = None, current_intensity: float | None = 0.63
+) -> RainNowcastData:
     motion = RadarMotion(
         dx_pixels=4,
         dy_pixels=-2,
@@ -33,7 +38,7 @@ def _data(prediction: RainPrediction | None = None) -> RainNowcastData:
         heading_degrees=63.4,
     )
     return RainNowcastData(
-        current_intensity=0.63,
+        current_intensity=current_intensity,
         radar_timestamp=datetime(2026, 7, 18, tzinfo=UTC),
         radar_timestamp_text="2026-07-18 12:00",
         source_url="https://example.invalid/radar.tif",
@@ -79,8 +84,9 @@ async def test_platform_setup_creates_all_entities() -> None:
 
     assert len(sensors) == 8
     assert sensors[0].unique_id == "rain_nowcast_rain_intensity"
-    assert len(binary_sensors) == 1
-    assert binary_sensors[0].unique_id == "rain_nowcast_rain_approaching"
+    assert len(binary_sensors) == 2
+    assert binary_sensors[0].unique_id == "rain_nowcast_rain_now"
+    assert binary_sensors[1].unique_id == "rain_nowcast_rain_approaching"
 
 
 def test_eta_and_approaching_are_unavailable_until_a_prediction_exists() -> None:
@@ -100,7 +106,7 @@ def test_eta_and_approaching_use_prediction_and_configured_thresholds() -> None:
         forecast_horizon_minutes=20,
         motion_confidence=0.8,
     )
-    coordinator = _coordinator(_data(prediction))
+    coordinator = _coordinator(_data(prediction, current_intensity=0.0))
 
     eta = RainEtaSensor(coordinator)
     approaching = RainApproachingBinarySensor(coordinator)
@@ -121,3 +127,16 @@ def test_rain_already_at_home_is_not_reported_as_approaching() -> None:
     )
 
     assert RainApproachingBinarySensor(_coordinator(_data(prediction))).is_on is False
+
+
+def test_raining_now_uses_current_intensity_independently_of_eta() -> None:
+    """The current-rain state does not depend on motion or a past ETA."""
+    assert RainingNowBinarySensor(_coordinator(_data())).is_on is True
+    assert (
+        RainingNowBinarySensor(_coordinator(_data(current_intensity=0.0))).is_on
+        is False
+    )
+    assert (
+        RainingNowBinarySensor(_coordinator(_data(current_intensity=None))).is_on
+        is None
+    )

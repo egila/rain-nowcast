@@ -87,6 +87,13 @@ def test_eta_handles_current_arrival_horizon_and_no_arrival() -> None:
     )
 
 
+def test_eta_never_treats_no_echo_as_rain_with_a_zero_threshold() -> None:
+    """A zero user threshold must not turn dry radar samples into an arrival."""
+    dry = np.zeros((20, 30), dtype=np.uint8)
+
+    assert predict_rain_arrival(_frame(dry), _motion(), 10, 20, 0.0, 60, 0) is None
+
+
 def test_eta_uses_the_configured_neighborhood() -> None:
     """A nearby cell can trigger a future robust arrival when it moves homeward."""
     data = np.zeros((20, 30), dtype=np.uint8)
