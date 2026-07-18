@@ -42,6 +42,7 @@ from .radar import (
 
 _LOGGER = logging.getLogger(__name__)
 MAX_PREDICTION_FRAME_AGE_MINUTES = 15.0
+STARTUP_BACKFILL_FRAMES = 2
 _DEFAULT_SETTINGS = NowcastSettings()
 
 
@@ -107,37 +108,65 @@ class RainNowcastCoordinator(DataUpdateCoordinator[RainNowcastData]):
         )
 
     async def _async_update_data(self) -> RainNowcastData:
-        """Download and decode the newest GeoTIFF without blocking the event loop."""
+        """Download the newest frame and seed an empty cache from recent history."""
         try:
             async with self._session.get(API_URL, params=API_PARAMS) as response:
                 response.raise_for_status()
                 metadata: Mapping[str, Any] = await response.json()
-
-            image_url, valid_time_text = _latest_geotiff(metadata)
-            timestamp = _parse_radar_timestamp(valid_time_text)
-            if timestamp is None:
-                raise ValueError("SMHI GeoTIFF response has no valid timestamp")
-
-            async with self._session.get(image_url) as response:
-                response.raise_for_status()
-                geotiff = await response.read()
-
-            frame, current_intensity = await self.hass.async_add_executor_job(
-                _decode_and_sample_frame,
-                geotiff,
-                timestamp,
-                self._latitude,
-                self._longitude,
-            )
-        except RadarLocationOutsideCoverage as err:
-            raise UpdateFailed(
-                "The configured Home Assistant location is outside SMHI radar coverage"
-            ) from err
         except (ClientError, HomeAssistantError, ValueError) as err:
             message = f"Error communicating with SMHI radar API: {err}"
             raise UpdateFailed(message) from err
 
-        self._frames.add(frame)
+        requested_frames = STARTUP_BACKFILL_FRAMES if not self._frames else 1
+        sources = _recent_geotiffs(metadata, requested_frames)
+        latest_source = sources[-1]
+        latest_frame: RadarFrame | None = None
+        current_intensity: float | None = None
+
+        for image_url, valid_time_text in sources:
+            is_latest = (image_url, valid_time_text) == latest_source
+            try:
+                timestamp = _parse_radar_timestamp(valid_time_text)
+                if timestamp is None:
+                    raise ValueError("SMHI GeoTIFF response has no valid timestamp")
+                async with self._session.get(image_url) as response:
+                    response.raise_for_status()
+                    geotiff = await response.read()
+                if is_latest:
+                    frame, current_intensity = await self.hass.async_add_executor_job(
+                        _decode_and_sample_frame,
+                        geotiff,
+                        timestamp,
+                        self._latitude,
+                        self._longitude,
+                    )
+                else:
+                    frame = await self.hass.async_add_executor_job(
+                        decode_radar_frame, geotiff, timestamp
+                    )
+            except RadarLocationOutsideCoverage as err:
+                if is_latest:
+                    raise UpdateFailed(
+                        "The configured Home Assistant location is outside "
+                        "SMHI radar coverage"
+                    ) from err
+                _LOGGER.debug("Skipping backfill frame outside radar coverage: %s", err)
+                continue
+            except (ClientError, HomeAssistantError, ValueError) as err:
+                if is_latest:
+                    message = f"Error communicating with SMHI radar API: {err}"
+                    raise UpdateFailed(message) from err
+                _LOGGER.debug("Skipping unavailable radar backfill frame: %s", err)
+                continue
+
+            self._frames.add(frame)
+            if is_latest:
+                latest_frame = frame
+
+        if latest_frame is None:
+            raise UpdateFailed("SMHI response did not provide a usable latest GeoTIFF")
+
+        frame = latest_frame
         frame_age_minutes = max(
             0.0, (datetime.now(UTC) - frame.timestamp).total_seconds() / 60.0
         )
@@ -215,8 +244,27 @@ def _parse_radar_timestamp(value: str | None) -> datetime | None:
 
 def _latest_geotiff(metadata: Mapping[str, Any]) -> tuple[str, str | None]:
     """Return the GeoTIFF link and observation time from API metadata."""
+    return _recent_geotiffs(metadata, 1)[0]
+
+
+def _recent_geotiffs(
+    metadata: Mapping[str, Any], count: int
+) -> tuple[tuple[str, str | None], ...]:
+    """Return up to ``count`` distinct GeoTIFFs, ordered oldest to newest."""
+    sources: list[tuple[str, str | None]] = []
+    seen_identifiers: set[str] = set()
     for file_info in reversed(metadata.get("lastFiles", [])):
+        valid_time = file_info.get("valid")
         for image_format in file_info.get("formats", []):
             if image_format.get("key") == "tif" and image_format.get("link"):
-                return image_format["link"], file_info.get("valid")
-    raise ValueError("SMHI response does not contain a GeoTIFF image")
+                image_url = image_format["link"]
+                identifier = valid_time or image_url
+                if identifier not in seen_identifiers:
+                    sources.append((image_url, valid_time))
+                    seen_identifiers.add(identifier)
+                break
+        if len(sources) >= count:
+            break
+    if not sources:
+        raise ValueError("SMHI response does not contain a GeoTIFF image")
+    return tuple(reversed(sources))

@@ -35,12 +35,13 @@ processing. The Z-R conversion is `Z = 10 log10(200 R^1.5)`.
 
 ## Availability and options
 
-On the first valid frame only current intensity and frame age are available.
-Motion and ETA require two valid, shape-compatible frames with a plausible
-interval and sufficient wet-pixel correlation. A low-confidence or stale
-frame retains current intensity but leaves ETA unavailable. Settings are read
-from the config-entry Options Flow on every update, so an entry never needs to
-be recreated.
+When the cache is empty, the coordinator downloads SMHI's two newest distinct
+GeoTIFFs in chronological order to seed motion estimation immediately. Later
+updates download only the newest frame. Motion and ETA still require two valid,
+shape-compatible frames with a plausible interval and sufficient wet-pixel
+correlation. A low-confidence or stale frame retains current intensity but
+leaves ETA unavailable. Settings are read from the config-entry Options Flow
+on every update, so an entry never needs to be recreated.
 
 Normal data conditions (dry radar, duplicate timestamps, incompatible frames,
 or no projected arrival) result in unavailable prediction entities, not a

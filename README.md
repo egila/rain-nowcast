@@ -45,10 +45,10 @@ General**. It supports locations in SMHI's Sweden-composite coverage area.
 | `sensor.radar_speed` / `sensor.radar_heading` | Estimated motion speed in `km/h` and heading (0° north, 90° east). |
 | `sensor.radar_frame_age` | Age of the newest source frame in minutes. |
 
-Motion-related entities and ETA are normally unavailable immediately after
-startup because the integration needs two distinct radar frames. That usually
-takes one radar publication interval (about five minutes). Current intensity
-is available from the first frame.
+On startup the integration downloads SMHI's two newest distinct frames to seed
+the motion cache, so motion and ETA can normally be available immediately.
+If SMHI has only one usable recent frame, current intensity remains available
+and prediction entities stay unavailable until the next update.
 
 ## Predictor behavior and limits
 
