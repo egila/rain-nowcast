@@ -41,7 +41,7 @@ class RainIntensitySensor(CoordinatorEntity[RainNowcastCoordinator], SensorEntit
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, DOMAIN)},
             name="Rain Nowcast",
-            manufacturer="SMHI",
+            manufacturer="Rain Nowcast",
             model="Sweden radar composite",
         )
 
