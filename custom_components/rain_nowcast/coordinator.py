@@ -1,9 +1,10 @@
-"""Coordinator for polling SMHI radar images."""
+"""Coordinator for polling SMHI radar images and calculating a nowcast."""
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 from aiohttp import ClientError
@@ -16,14 +17,35 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
-from .const import API_PARAMS, API_URL, DEFAULT_SCAN_INTERVAL, DOMAIN
-from .radar import RadarLocationOutsideCoverage, sample_rain_intensity
+from .const import (
+    API_PARAMS,
+    API_URL,
+    CONF_APPROACHING_LEAD_MINUTES,
+    CONF_MAX_FORECAST_MINUTES,
+    CONF_MIN_MOTION_CONFIDENCE,
+    CONF_NEIGHBORHOOD_RADIUS,
+    CONF_RAIN_THRESHOLD,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+)
+from .frame_cache import RadarFrameCache
+from .models import NowcastSettings, RadarFrame, RainNowcastData
+from .motion import estimate_motion
+from .predictor import predict_rain_arrival
+from .radar import (
+    RadarLocationOutsideCoverage,
+    decode_radar_frame,
+    location_to_radar_pixel,
+    sample_rain_intensity,
+)
 
 _LOGGER = logging.getLogger(__name__)
+MAX_PREDICTION_FRAME_AGE_MINUTES = 15.0
+_DEFAULT_SETTINGS = NowcastSettings()
 
 
-class RainNowcastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Fetch and decode the newest SMHI radar image."""
+class RainNowcastCoordinator(DataUpdateCoordinator[RainNowcastData]):
+    """Fetch, decode, and predict from the newest SMHI radar image."""
 
     def __init__(
         self,
@@ -40,24 +62,71 @@ class RainNowcastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             name=DOMAIN,
             update_interval=DEFAULT_SCAN_INTERVAL,
         )
+        self._config_entry = config_entry
         self._latitude = latitude
         self._longitude = longitude
         self._session = async_get_clientsession(hass)
+        self._frames = RadarFrameCache()
 
-    async def _async_update_data(self) -> dict[str, Any]:
+    @property
+    def frame_cache(self) -> RadarFrameCache:
+        """Expose the compact cache metadata to integration diagnostics."""
+        return self._frames
+
+    @property
+    def settings(self) -> NowcastSettings:
+        """Return validated option values, retaining defaults for existing entries."""
+        options = self._config_entry.options
+        return NowcastSettings(
+            rain_threshold=float(
+                options.get(CONF_RAIN_THRESHOLD, _DEFAULT_SETTINGS.rain_threshold)
+            ),
+            approaching_lead_minutes=int(
+                options.get(
+                    CONF_APPROACHING_LEAD_MINUTES,
+                    _DEFAULT_SETTINGS.approaching_lead_minutes,
+                )
+            ),
+            max_forecast_minutes=int(
+                options.get(
+                    CONF_MAX_FORECAST_MINUTES, _DEFAULT_SETTINGS.max_forecast_minutes
+                )
+            ),
+            min_motion_confidence=float(
+                options.get(
+                    CONF_MIN_MOTION_CONFIDENCE,
+                    _DEFAULT_SETTINGS.min_motion_confidence,
+                )
+            ),
+            neighborhood_radius=int(
+                options.get(
+                    CONF_NEIGHBORHOOD_RADIUS, _DEFAULT_SETTINGS.neighborhood_radius
+                )
+            ),
+        )
+
+    async def _async_update_data(self) -> RainNowcastData:
         """Download and decode the newest GeoTIFF without blocking the event loop."""
         try:
             async with self._session.get(API_URL, params=API_PARAMS) as response:
                 response.raise_for_status()
                 metadata: Mapping[str, Any] = await response.json()
 
-            image_url, valid_time = _latest_geotiff(metadata)
+            image_url, valid_time_text = _latest_geotiff(metadata)
+            timestamp = _parse_radar_timestamp(valid_time_text)
+            if timestamp is None:
+                raise ValueError("SMHI GeoTIFF response has no valid timestamp")
+
             async with self._session.get(image_url) as response:
                 response.raise_for_status()
                 geotiff = await response.read()
 
-            intensity = await self.hass.async_add_executor_job(
-                sample_rain_intensity, geotiff, self._latitude, self._longitude
+            frame, current_intensity = await self.hass.async_add_executor_job(
+                _decode_and_sample_frame,
+                geotiff,
+                timestamp,
+                self._latitude,
+                self._longitude,
             )
         except RadarLocationOutsideCoverage as err:
             raise UpdateFailed(
@@ -67,11 +136,75 @@ class RainNowcastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             message = f"Error communicating with SMHI radar API: {err}"
             raise UpdateFailed(message) from err
 
-        return {
-            "intensity": intensity,
-            "valid_time": valid_time,
-            "source_url": image_url,
-        }
+        self._frames.add(frame)
+        frame_age_minutes = max(
+            0.0, (datetime.now(UTC) - frame.timestamp).total_seconds() / 60.0
+        )
+        motion = None
+        prediction = None
+        latest_pair = self._frames.latest_pair()
+        if latest_pair is not None:
+            motion = await self.hass.async_add_executor_job(
+                estimate_motion, *latest_pair
+            )
+
+        if motion is not None and frame_age_minutes <= MAX_PREDICTION_FRAME_AGE_MINUTES:
+            if motion.confidence >= self.settings.min_motion_confidence:
+                try:
+                    column, row = location_to_radar_pixel(
+                        self._latitude,
+                        self._longitude,
+                        frame.data.shape[1],
+                        frame.data.shape[0],
+                    )
+                    prediction = await self.hass.async_add_executor_job(
+                        predict_rain_arrival,
+                        frame,
+                        motion,
+                        row,
+                        column,
+                        self.settings.rain_threshold,
+                        self.settings.max_forecast_minutes,
+                        self.settings.neighborhood_radius,
+                    )
+                except (ArithmeticError, ValueError) as err:
+                    _LOGGER.debug("Rain-arrival prediction unavailable: %s", err)
+        elif (
+            motion is not None and frame_age_minutes > MAX_PREDICTION_FRAME_AGE_MINUTES
+        ):
+            _LOGGER.debug(
+                "Skipping rain-arrival prediction; newest frame is %.1f minutes old",
+                frame_age_minutes,
+            )
+
+        return RainNowcastData(
+            current_intensity=current_intensity,
+            radar_timestamp=frame.timestamp,
+            radar_timestamp_text=valid_time_text,
+            source_url=image_url,
+            motion=motion,
+            prediction=prediction,
+            frame_age_minutes=round(frame_age_minutes, 1),
+            cached_frame_count=len(self._frames),
+        )
+
+
+def _decode_and_sample_frame(
+    geotiff: bytes, timestamp: datetime, latitude: float, longitude: float
+) -> tuple[RadarFrame, float | None]:
+    """Decode one complete frame and sample its current home-location intensity."""
+    frame = decode_radar_frame(geotiff, timestamp)
+    # The cached frame replaces nodata with zero for correlation. Sample the
+    # original TIFF separately so today's intensity still distinguishes nodata
+    # from genuinely dry radar, preserving the established sensor behavior.
+    return frame, sample_rain_intensity(geotiff, latitude, longitude)
+
+
+def _parse_radar_timestamp(value: str | None) -> datetime | None:
+    """Parse the UTC validity time returned by SMHI metadata."""
+    if value is None:
+        return None
+    return datetime.strptime(value, "%Y-%m-%d %H:%M").replace(tzinfo=UTC)
 
 
 def _latest_geotiff(metadata: Mapping[str, Any]) -> tuple[str, str | None]:

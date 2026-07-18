@@ -13,9 +13,7 @@ from custom_components.rain_nowcast.coordinator import _latest_geotiff
 def test_coordinator_uses_its_config_entry(monkeypatch: pytest.MonkeyPatch) -> None:
     """The first coordinator refresh belongs to the configured entry."""
     coordinator_init = MagicMock()
-    monkeypatch.setattr(
-        coordinator.DataUpdateCoordinator, "__init__", coordinator_init
-    )
+    monkeypatch.setattr(coordinator.DataUpdateCoordinator, "__init__", coordinator_init)
     monkeypatch.setattr(coordinator, "async_get_clientsession", MagicMock())
     entry = MagicMock()
 

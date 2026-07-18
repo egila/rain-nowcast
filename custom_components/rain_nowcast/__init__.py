@@ -12,9 +12,7 @@ from .coordinator import RainNowcastCoordinator
 type RainNowcastConfigEntry = ConfigEntry[RainNowcastCoordinator]
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, entry: RainNowcastConfigEntry
-) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: RainNowcastConfigEntry) -> bool:
     """Set up Rain Nowcast from a config entry."""
     coordinator = RainNowcastCoordinator(
         hass,

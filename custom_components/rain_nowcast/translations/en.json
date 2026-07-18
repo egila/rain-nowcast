@@ -9,5 +9,19 @@
     "abort": {
       "single_instance_allowed": "Rain Nowcast is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Rain predictor settings",
+        "data": {
+          "rain_threshold": "Rain threshold (mm/h)",
+          "approaching_lead_minutes": "Rain-approaching lead time (minutes)",
+          "max_forecast_minutes": "Maximum forecast horizon (minutes)",
+          "min_motion_confidence": "Minimum motion confidence (0-1)",
+          "neighborhood_radius": "Home sampling radius (pixels)"
+        }
+      }
+    }
   }
 }

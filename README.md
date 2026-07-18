@@ -2,26 +2,25 @@
 
 `rain_nowcast` is a HACS-compatible custom integration for Home Assistant OS.
 It downloads SMHI's official Sweden radar composite as a GeoTIFF every five
-minutes and reports the current rain intensity at Home Assistant's configured
-home location.
+minutes, reports the current rain intensity at Home Assistant's configured
+home location, and estimates near-term rain arrival.
 
 Rain Nowcast is an unofficial integration and is not affiliated with or
 endorsed by SMHI.
 
-> This is Phase 1. It intentionally implements only `sensor.rain_intensity`.
-> ETA, confidence, duration, and approaching-rain entities are planned for the
-> frame-history nowcasting phase; exposing them before they are computed would
-> be misleading.
-
 ## Features
 
-- Fully asynchronous Home Assistant integration with `DataUpdateCoordinator`
-- Config Flow setup; no API key and no coordinates to enter
-- Converts the home latitude/longitude from WGS84 into SMHI's SWEREF 99 TM
-  radar grid
-- Reports precipitation intensity in `mm/h`, with radar observation time and
-  source URL as attributes
-- Handles locations outside the Sweden radar composite gracefully
+- Config Flow setup with no API key or manually entered coordinates
+- Converts Home Assistant's WGS84 home location to SMHI's SWEREF 99 TM radar
+  grid
+- Reports current precipitation intensity in `mm/h`
+- Keeps up to 12 radar frames only in memory and estimates one global motion
+  vector from the newest two frames
+- Projects the newest frame in five-minute steps up to 60 minutes, with
+  configurable rain threshold, lead time, confidence, horizon, and sampling
+  radius
+- Uses asynchronous network I/O and Home Assistant's executor for TIFF/
+  NumPy processing
 
 ## Installation with HACS
 
@@ -34,25 +33,68 @@ endorsed by SMHI.
 The integration uses the latitude and longitude under **Settings → System →
 General**. It supports locations in SMHI's Sweden-composite coverage area.
 
-## Entity roadmap
+## Entities
 
-| Entity | Unit | Phase |
-| --- | --- | --- |
-| `sensor.rain_intensity` | `mm/h` | Implemented |
-| `sensor.rain_eta` | minutes | Planned |
-| `sensor.rain_confidence` | percent | Planned |
-| `sensor.rain_duration` | minutes | Planned |
-| `binary_sensor.rain_approaching` | on/off | Planned |
+| Entity | Meaning |
+| --- | --- |
+| `sensor.rain_intensity` | Current radar-estimated rain intensity in `mm/h`. |
+| `sensor.rain_eta` | Timestamp for the first predicted arrival; unavailable when no rain is forecast within the selected horizon. Its attributes include `eta_minutes` and predicted intensity. |
+| `binary_sensor.rain_approaching` | On for a sufficiently confident rain arrival within the configured lead time. |
+| `sensor.rain_confidence` | Phase-correlation confidence in percent. |
+| `sensor.radar_motion_x` / `sensor.radar_motion_y` | Eastward and southward movement per radar update, in pixels. |
+| `sensor.radar_speed` / `sensor.radar_heading` | Estimated motion speed in `km/h` and heading (0° north, 90° east). |
+| `sensor.radar_frame_age` | Age of the newest source frame in minutes. |
 
-`0` means no echo. `unknown` means that the configured location is outside
-radar coverage or the source was unavailable. Rainfall is calculated from
-SMHI's documented reflectivity relationship, so it is a radar estimate rather
-than a rain-gauge reading.
+Motion-related entities and ETA are normally unavailable immediately after
+startup because the integration needs two distinct radar frames. That usually
+takes one radar publication interval (about five minutes). Current intensity
+is available from the first frame.
+
+## Predictor behavior and limits
+
+The first-generation predictor treats all precipitation in the Sweden radar
+composite as moving with one global translation vector. It uses phase
+correlation on thresholded, downsampled radar arrays and samples the projected
+field in a small configurable neighborhood around home. It does not use
+optical flow, machine learning, cell tracking, or growth/decay modelling.
+
+This makes the 5–30 minute range generally the most useful. Treat 60-minute
+results as a coarse indication. Predictions can be poor when precipitation
+grows, dissipates, splits, merges, is blocked by terrain, or moves differently
+in different parts of the radar image. Stale frames (older than 15 minutes) do
+not produce a fresh ETA.
+
+`sensor.rain_duration` is intentionally not exposed: a global translation
+model cannot estimate rain duration reliably without modelling precipitation
+evolution.
+
+Configure threshold, lead time, maximum horizon, minimum confidence, and home
+sampling radius via **Settings → Devices & services → Rain Nowcast →
+Configure**. Existing configuration entries do not need to be recreated.
+
+## Automation example
+
+```yaml
+alias: Rain approaching
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.rain_approaching
+    to: "on"
+actions:
+  - action: notify.notify
+    data:
+      title: Rain approaching
+      message: >
+        Rain is expected in approximately
+        {{ state_attr('binary_sensor.rain_approaching', 'eta_minutes') }}
+        minutes.
+mode: single
+```
 
 ## Development
 
-See [developer documentation](development.md). This project is licensed
-under the [MIT License](LICENSE).
+See [developer documentation](development.md). This project is licensed under
+the [MIT License](LICENSE).
 
 ## Data attribution
 

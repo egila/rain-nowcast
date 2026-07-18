@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from io import BytesIO
 from unittest.mock import MagicMock
 
@@ -62,9 +63,7 @@ def test_sample_rain_intensity_reads_lzw_geotiff(
     assert radar.sample_rain_intensity(geotiff.getvalue(), 59.33, 18.07) == 0.63
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"), [(0, 0.0), (255, None), (80, 0.0)]
-)
+@pytest.mark.parametrize(("value", "expected"), [(0, 0.0), (255, None), (80, 0.0)])
 def test_sample_rain_intensity_handles_non_rain_values(
     monkeypatch: pytest.MonkeyPatch,
     center_radar_grid: None,
@@ -75,3 +74,20 @@ def test_sample_rain_intensity_handles_non_rain_values(
     monkeypatch.setattr(radar.Image, "open", lambda _: _FakeImage(value))
 
     assert radar.sample_rain_intensity(b"geotiff", 59.33, 18.07) == expected
+
+
+def test_decode_radar_frame_replaces_nodata_with_dry_values() -> None:
+    """Full-frame decoding preserves dimensions and keeps invalid values out of FFTs."""
+    geotiff = BytesIO()
+    image = Image.new("L", (2, 3), 120)
+    image.putpixel((1, 2), 255)
+    image.save(geotiff, format="TIFF", compression="tiff_lzw")
+
+    frame = radar.decode_radar_frame(
+        geotiff.getvalue(), datetime(2026, 7, 18, tzinfo=UTC)
+    )
+
+    assert frame.data.shape == (3, 2)
+    assert frame.data[2, 1] == 0
+    assert frame.pixel_size_x_m > 0
+    assert frame.pixel_size_y_m > 0
