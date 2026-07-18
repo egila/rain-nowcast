@@ -7,7 +7,46 @@ from unittest.mock import MagicMock
 import pytest
 
 from custom_components.rain_nowcast import coordinator
-from custom_components.rain_nowcast.coordinator import _latest_geotiff, _recent_geotiffs
+from custom_components.rain_nowcast.coordinator import (
+    _catalog_link,
+    _include_latest_source,
+    _latest_geotiff,
+    _recent_archive_geotiffs,
+    _recent_geotiffs,
+)
+
+
+class _CatalogResponse:
+    """Minimal asynchronous HTTP response for archive-navigation tests."""
+
+    def __init__(self, data: dict[str, object]) -> None:
+        self._data = data
+
+    async def __aenter__(self) -> _CatalogResponse:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    def raise_for_status(self) -> None:
+        """Model a successful SMHI response."""
+
+    async def json(self) -> dict[str, object]:
+        """Return one catalogue payload."""
+        return self._data
+
+
+class _CatalogSession:
+    """Minimal shared session that serves a fixed archive hierarchy."""
+
+    def __init__(self, catalogues: dict[str, dict[str, object]]) -> None:
+        self.catalogues = catalogues
+        self.urls: list[str] = []
+
+    def get(self, url: str, **kwargs: object) -> _CatalogResponse:
+        """Return the response associated with one archive link."""
+        self.urls.append(url)
+        return _CatalogResponse(self.catalogues[url])
 
 
 def test_coordinator_uses_its_config_entry(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,8 +87,8 @@ def test_latest_geotiff_requires_tif() -> None:
         _latest_geotiff({"lastFiles": []})
 
 
-def test_recent_geotiffs_backfills_distinct_frames_in_time_order() -> None:
-    """Startup backfill takes recent distinct TIFFs but returns oldest first."""
+def test_recent_geotiffs_returns_distinct_last_file_entries_in_time_order() -> None:
+    """The live metadata helper keeps distinct TIFF entries in time order."""
     sources = _recent_geotiffs(
         {
             "lastFiles": [
@@ -66,3 +105,74 @@ def test_recent_geotiffs_backfills_distinct_frames_in_time_order() -> None:
     )
 
     assert sources == (("b", "2026-07-18 12:05"), ("c-duplicate", "2026-07-18 12:10"))
+
+
+def test_archive_backfill_uses_the_newest_dated_geotiffs() -> None:
+    """Daily archive files are ordered by validity time, not API list ordering."""
+    sources = _recent_archive_geotiffs(
+        [
+            {"valid": "2026-07-18 12:10", "formats": [{"key": "tif", "link": "c"}]},
+            {"valid": "2026-07-18 12:00", "formats": [{"key": "tif", "link": "a"}]},
+            {"valid": "2026-07-18 12:05", "formats": [{"key": "tif", "link": "b"}]},
+        ],
+        2,
+    )
+
+    assert sources == (("b", "2026-07-18 12:05"), ("c", "2026-07-18 12:10"))
+
+
+def test_archive_backfill_includes_latest_live_frame_when_archive_lags() -> None:
+    """The freshest live frame replaces an older archive result when necessary."""
+    sources = _include_latest_source(
+        (("a", "2026-07-18 12:00"), ("b", "2026-07-18 12:05")),
+        ("latest", "2026-07-18 12:10"),
+    )
+
+    assert sources == (("b", "2026-07-18 12:05"), ("latest", "2026-07-18 12:10"))
+
+
+def test_catalog_link_matches_zero_padded_archive_keys() -> None:
+    """Archive navigation works whether SMHI returns 7 or 07 for a month/day."""
+    assert (
+        _catalog_link({"months": [{"key": "7", "link": "month"}]}, "months", "07")
+        == "month"
+    )
+
+
+async def test_startup_backfill_navigates_the_daily_archive() -> None:
+    """A cold cache follows year, month, and day links to collect TIFF history."""
+    instance = object.__new__(coordinator.RainNowcastCoordinator)
+    session = _CatalogSession(
+        {
+            "year": {"months": [{"key": "07", "link": "month"}]},
+            "month": {"days": [{"key": "18", "link": "day"}]},
+            "day": {
+                "files": [
+                    {
+                        "valid": "2026-07-18 12:00",
+                        "formats": [{"key": "tif", "link": "older"}],
+                    },
+                    {
+                        "valid": "2026-07-18 12:05",
+                        "formats": [{"key": "tif", "link": "latest"}],
+                    },
+                ]
+            },
+        }
+    )
+    instance._session = session
+
+    sources = await instance._async_startup_backfill_sources(
+        {
+            "years": [{"key": "2026", "link": "year"}],
+            "lastFiles": [
+                {
+                    "valid": "2026-07-18 12:05",
+                    "formats": [{"key": "tif", "link": "latest"}],
+                }
+            ],
+        }
+    )
+
+    assert session.urls == ["year", "month", "day"]
+    assert sources == (("older", "2026-07-18 12:00"), ("latest", "2026-07-18 12:05"))

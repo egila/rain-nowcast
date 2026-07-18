@@ -107,6 +107,37 @@ class RainNowcastCoordinator(DataUpdateCoordinator[RainNowcastData]):
             ),
         )
 
+    async def _async_startup_backfill_sources(
+        self, metadata: Mapping[str, Any]
+    ) -> tuple[tuple[str, str | None], ...]:
+        """Find today's recent TIFFs through SMHI's year/month/day archive."""
+        latest_source = _latest_geotiff(metadata)
+        timestamp = _parse_radar_timestamp(latest_source[1])
+        if timestamp is None:
+            return (latest_source,)
+
+        try:
+            year = _catalog_link(metadata, "years", f"{timestamp.year:04d}")
+            year_data = await self._async_get_catalog(year)
+            month = _catalog_link(year_data, "months", f"{timestamp.month:02d}")
+            month_data = await self._async_get_catalog(month)
+            day = _catalog_link(month_data, "days", f"{timestamp.day:02d}")
+            day_data = await self._async_get_catalog(day)
+            sources = _recent_archive_geotiffs(
+                day_data.get("files", []), STARTUP_BACKFILL_FRAMES
+            )
+        except (ClientError, HomeAssistantError, ValueError) as err:
+            _LOGGER.debug("SMHI startup backfill unavailable: %s", err)
+            return (latest_source,)
+
+        return _include_latest_source(sources, latest_source)
+
+    async def _async_get_catalog(self, url: str) -> Mapping[str, Any]:
+        """Fetch one SMHI archive catalogue level using TIFF-only links."""
+        async with self._session.get(url, params=API_PARAMS) as response:
+            response.raise_for_status()
+            return await response.json()
+
     async def _async_update_data(self) -> RainNowcastData:
         """Download the newest frame and seed an empty cache from recent history."""
         try:
@@ -117,9 +148,12 @@ class RainNowcastCoordinator(DataUpdateCoordinator[RainNowcastData]):
             message = f"Error communicating with SMHI radar API: {err}"
             raise UpdateFailed(message) from err
 
-        requested_frames = STARTUP_BACKFILL_FRAMES if not self._frames else 1
         try:
-            sources = _recent_geotiffs(metadata, requested_frames)
+            sources = (
+                await self._async_startup_backfill_sources(metadata)
+                if not self._frames
+                else (_latest_geotiff(metadata),)
+            )
         except ValueError as err:
             raise UpdateFailed(
                 f"Error communicating with SMHI radar API: {err}"
@@ -273,3 +307,57 @@ def _recent_geotiffs(
     if not sources:
         raise ValueError("SMHI response does not contain a GeoTIFF image")
     return tuple(reversed(sources))
+
+
+def _catalog_link(metadata: Mapping[str, Any], key: str, wanted: str) -> str:
+    """Return a dated SMHI catalogue link without relying on list ordering."""
+    for item in metadata.get(key, []):
+        item_key = str(item.get("key", ""))
+        if item_key == wanted or item_key.lstrip("0") == wanted.lstrip("0"):
+            link = item.get("link")
+            if isinstance(link, str) and link:
+                return link
+    raise ValueError(f"SMHI archive does not contain {key} entry {wanted}")
+
+
+def _recent_archive_geotiffs(
+    files: list[Mapping[str, Any]], count: int
+) -> tuple[tuple[str, str], ...]:
+    """Return the newest unique dated TIFFs from one SMHI daily archive."""
+    sources: dict[datetime, tuple[str, str]] = {}
+    for file_info in files:
+        valid_time = file_info.get("valid")
+        if not isinstance(valid_time, str):
+            continue
+        timestamp = _parse_radar_timestamp(valid_time)
+        if timestamp is None:
+            continue
+        for image_format in file_info.get("formats", []):
+            image_url = image_format.get("link")
+            if image_format.get("key") == "tif" and isinstance(image_url, str):
+                sources[timestamp] = (image_url, valid_time)
+                break
+    if not sources:
+        raise ValueError("SMHI daily archive does not contain a GeoTIFF image")
+    return tuple(source for _, source in sorted(sources.items())[-count:])
+
+
+def _include_latest_source(
+    sources: tuple[tuple[str, str], ...], latest: tuple[str, str | None]
+) -> tuple[tuple[str, str | None], ...]:
+    """Ensure an archive delay cannot omit the newest live GeoTIFF."""
+    latest_timestamp = _parse_radar_timestamp(latest[1])
+    if latest_timestamp is None or any(valid == latest[1] for _, valid in sources):
+        return sources
+    combined = (*sources, latest)
+    return tuple(
+        source
+        for _, source in sorted(
+            (
+                (_parse_radar_timestamp(valid), (url, valid))
+                for url, valid in combined
+                if _parse_radar_timestamp(valid) is not None
+            ),
+            key=lambda item: item[0],
+        )[-STARTUP_BACKFILL_FRAMES:]
+    )

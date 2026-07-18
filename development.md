@@ -35,9 +35,10 @@ processing. The Z-R conversion is `Z = 10 log10(200 R^1.5)`.
 
 ## Availability and options
 
-When the cache is empty, the coordinator downloads SMHI's two newest distinct
-GeoTIFFs in chronological order to seed motion estimation immediately. Later
-updates download only the newest frame. Motion and ETA still require two valid,
+When the cache is empty, the coordinator follows SMHI's year/month/day archive
+to download the two newest distinct GeoTIFFs in chronological order. It keeps
+the live latest TIFF if the archive has not caught up yet. Later updates
+download only the newest frame. Motion and ETA still require two valid,
 shape-compatible frames with a plausible interval and sufficient wet-pixel
 correlation. A low-confidence or stale frame retains current intensity but
 leaves ETA unavailable. Settings are read from the config-entry Options Flow
