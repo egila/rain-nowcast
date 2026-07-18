@@ -3,10 +3,8 @@
 
 from __future__ import annotations
 
-
 from datetime import timedelta
 from typing import Final
-
 
 DOMAIN: Final = "rain_nowcast"
 PLATFORMS: Final = ["sensor"]
@@ -19,7 +17,7 @@ DEFAULT_SCAN_INTERVAL: Final = timedelta(minutes=5)
 API_URL: Final = (
     "https://opendata-download-radar.smhi.se/api/version/latest/area/sweden/product/comp"
 )
-API_PARAMS: Final = {"format": "tif"}
+API_PARAMS: Final = {"format": "png"}
 
 
 # SMHI's Sweden composite is published in SWEREF 99 TM (EPSG:3006).
