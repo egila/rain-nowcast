@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from aiohttp import ClientError
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -24,12 +25,18 @@ _LOGGER = logging.getLogger(__name__)
 class RainNowcastCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Fetch and decode the newest SMHI radar image."""
 
-    def __init__(self, hass: HomeAssistant, latitude: float, longitude: float) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config_entry: ConfigEntry,
+        latitude: float,
+        longitude: float,
+    ) -> None:
         """Initialize the coordinator for a fixed Home Assistant location."""
         super().__init__(
             hass,
             _LOGGER,
-            config_entry=None,
+            config_entry=config_entry,
             name=DOMAIN,
             update_interval=DEFAULT_SCAN_INTERVAL,
         )

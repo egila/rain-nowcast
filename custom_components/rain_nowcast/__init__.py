@@ -18,6 +18,7 @@ async def async_setup_entry(
     """Set up Rain Nowcast from a config entry."""
     coordinator = RainNowcastCoordinator(
         hass,
+        config_entry=entry,
         latitude=hass.config.latitude,
         longitude=hass.config.longitude,
     )
