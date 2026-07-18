@@ -1,7 +1,5 @@
 homeassistant>=2026.7.0
-imagecodecs==2026.6.26
 pytest-homeassistant-custom-component==0.13.346
 pytest-asyncio==1.4.0
 pyproj==3.7.2
 ruff==0.14.14
-tifffile==2026.7.14
